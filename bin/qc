@@ -1,0 +1,7 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "shellwords"
+require "quick_check"
+
+exit(QuickCheck::CLI.start(ARGV))
