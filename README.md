@@ -99,10 +99,10 @@ If no config is present, `qc` will use the first existing branch among `main` or
 
 ## How it works
 
-- Unstaged: `git diff --name-only --diff-filter=ACMR`
-- Staged: `git diff --name-only --cached --diff-filter=ACMR`
+- Unstaged: `git diff --name-only --diff-filter=AM`
+- Staged: `git diff --name-only --cached --diff-filter=AM`
 - Untracked: `git ls-files --others --exclude-standard`
-- Committed vs base: `git diff --name-only --diff-filter=ACMR <base>...HEAD`
+- Committed vs base: `git diff --name-only --diff-filter=AM <base>...HEAD`
 
 Files are filtered to `spec/**/*_spec.rb` and/or `test/**/*_test.rb`, de-duplicated, sorted, and then:
 

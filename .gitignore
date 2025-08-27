@@ -1,5 +1,8 @@
 /.bundle/
 /pkg/
 Gemfile.lock
+.gitconfig
 
 *.gem
+
+quick_check-*.gem

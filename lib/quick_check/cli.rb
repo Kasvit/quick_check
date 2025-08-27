@@ -17,7 +17,7 @@ module QuickCheck
       @argv = argv
       @options = {
         base_branch: nil,
-        include_committed_diff: true,
+        include_committed_diff: false,
         include_staged: true,
         include_unstaged: true,
         custom_command: nil,
@@ -126,12 +126,12 @@ module QuickCheck
       files = []
 
       if @options[:include_unstaged]
-        files.concat(git_diff_name_only(["--name-only", "--diff-filter=ACMR"]))
+        files.concat(git_diff_name_only(["--name-only", "--diff-filter=AM"]))
         files.concat(git_untracked_files)
       end
 
       if @options[:include_staged]
-        files.concat(git_diff_name_only(["--name-only", "--cached", "--diff-filter=ACMR"]))
+        files.concat(git_diff_name_only(["--name-only", "--cached", "--diff-filter=AM"]))
       end
 
       if @options[:include_committed_diff]
@@ -139,7 +139,7 @@ module QuickCheck
         if current_branch && base_branch && current_branch != base_branch
           # Include files changed on this branch vs base
           range = diff_range_against_base(base_branch)
-          files.concat(git_diff_name_only(["--name-only", "--diff-filter=ACMR", range])) if range
+          files.concat(git_diff_name_only(["--name-only", "--diff-filter=AM", range])) if range
         end
       end
 
@@ -147,16 +147,7 @@ module QuickCheck
       rspec_specs = files.select { |f| f.match?(%r{\Aspec/.+_spec\.rb\z}) }
       minitest_tests = files.select { |f| f.match?(%r{\Atest/.+_test\.rb\z}) }
 
-      # Infer tests from source changes (e.g., app/models/user.rb -> spec/models/user_spec.rb)
-      source_files = files.reject { |f| f.match?(%r{\A(spec/|test/)}) }
-      unless source_files.empty?
-        inferred_rspec = source_files.flat_map { |src| infer_rspec_paths_for_source(src) }
-        inferred_minitest = source_files.flat_map { |src| infer_minitest_paths_for_source(src) }
-        rspec_specs.concat(inferred_rspec)
-        minitest_tests.concat(inferred_minitest)
-      end
-
-      { rspec: rspec_specs.uniq, minitest: minitest_tests.uniq }
+      { rspec: rspec_specs.sort, minitest: minitest_tests.sort }
     end
 
     def ensure_git_repo!
@@ -224,10 +215,12 @@ module QuickCheck
     end
 
     def diff_range_against_base(base)
-      return nil unless branch_exists?(base)
-      # If upstream exists, prefer merge-base to HEAD to include all branch commits
-      # The symmetric range base...HEAD ensures we include commits unique to the branch
-      "#{base}...HEAD"
+      # Prefer the symmetric range base...HEAD if base exists
+      if branch_exists?(base)
+        "#{base}...HEAD"
+      else
+        nil
+      end
     end
 
     def git_diff_name_only(args)
@@ -243,52 +236,6 @@ module QuickCheck
       return [] unless ok
 
       out.split("\n").map(&:strip).reject(&:empty?)
-    end
-
-    def infer_rspec_paths_for_source(source_path)
-      candidates = []
-      if source_path.start_with?("app/")
-        rel = source_path.sub(/^app\//, "")
-        # Prefer request specs for controllers
-        if rel.start_with?("controllers/")
-          sub_rel = rel.sub(/^controllers\//, "")
-          dir = File.dirname(sub_rel)
-          dir = "" if dir == "."
-          base_with_controller = File.basename(sub_rel, ".rb")
-          base_without_controller = base_with_controller.sub(/_controller\z/, "")
-          # Common conventions for request specs
-          candidates << File.join("spec", "requests", dir, "#{base_without_controller}_spec.rb")
-          candidates << File.join("spec", "requests", dir, "#{base_with_controller}_spec.rb")
-        end
-        candidates << File.join("spec", rel).sub(/\.rb\z/, "_spec.rb")
-      elsif source_path.start_with?("lib/")
-        rel = source_path.sub(/^lib\//, "")
-        candidates << File.join("spec", "lib", rel).sub(/\.rb\z/, "_spec.rb")
-      end
-
-      candidates.select { |p| File.file?(p) }
-    end
-
-    def infer_minitest_paths_for_source(source_path)
-      candidates = []
-      if source_path.start_with?("app/")
-        rel = source_path.sub(/^app\//, "")
-        # Prefer integration/request-style tests for controllers when present
-        if rel.start_with?("controllers/")
-          sub_rel = rel.sub(/^controllers\//, "")
-          dir = File.dirname(sub_rel)
-          dir = "" if dir == "."
-          base = File.basename(sub_rel, ".rb").sub(/_controller\z/, "")
-          integration_test = File.join("test", "integration", dir, "#{base}_test.rb")
-          candidates << integration_test
-        end
-        candidates << File.join("test", rel).sub(/\.rb\z/, "_test.rb")
-      elsif source_path.start_with?("lib/")
-        rel = source_path.sub(/^lib\//, "")
-        candidates << File.join("test", "lib", rel).sub(/\.rb\z/, "_test.rb")
-      end
-
-      candidates.select { |p| File.file?(p) }
     end
 
     def build_command_for(framework, files)
@@ -310,13 +257,11 @@ module QuickCheck
     end
 
     def rails_available?
-      bin_rails = File.join(Dir.pwd, "bin", "rails")
-      File.executable?(bin_rails) || File.file?(bin_rails) || gemfile_includes?("rails")
+      File.executable?(File.join(Dir.pwd, "bin", "rails")) || gemfile_includes?("rails")
     end
 
     def rails_cmd
-      bin_rails = File.join(Dir.pwd, "bin", "rails")
-      if File.executable?(bin_rails) || File.file?(bin_rails)
+      if File.executable?(File.join(Dir.pwd, "bin", "rails"))
         [File.join("bin", "rails")]
       else
         ["bundle", "exec", "rails"]
