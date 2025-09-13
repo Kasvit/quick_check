@@ -27,6 +27,7 @@ qc
   - Staged (index) changes
   - Untracked files (new specs not yet added)
   - All committed changes on your branch vs base (`main`/`master`)
+  - Renames and copies are tracked so moved tests still run
 - You can disable branch commits with `--no-committed`
 - Auto-detects base branch (`main` or `master`) or configure via `.quick_check.yml`
 - Auto-detects framework and command:
@@ -99,10 +100,10 @@ If no config is present, `qc` will use the first existing branch among `main` or
 
 ## How it works
 
-- Unstaged: `git diff --name-only --diff-filter=AM`
-- Staged: `git diff --name-only --cached --diff-filter=AM`
+- Unstaged: `git diff --name-only -M -C --diff-filter=ACMR`
+- Staged: `git diff --name-only --cached -M -C --diff-filter=ACMR`
 - Untracked: `git ls-files --others --exclude-standard`
-- Committed vs base: `git diff --name-only --diff-filter=AM <base>...HEAD`
+- Committed vs base: `git diff --name-only -M -C --diff-filter=ACMR <base>...HEAD`
 
 Files are filtered to `spec/**/*_spec.rb` and/or `test/**/*_test.rb`, de-duplicated, sorted, and then:
 

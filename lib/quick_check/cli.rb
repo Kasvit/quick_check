@@ -17,7 +17,7 @@ module QuickCheck
       @argv = argv
       @options = {
         base_branch: nil,
-        include_committed_diff: false,
+        include_committed_diff: true,
         include_staged: true,
         include_unstaged: true,
         custom_command: nil,
@@ -126,12 +126,12 @@ module QuickCheck
       files = []
 
       if @options[:include_unstaged]
-        files.concat(git_diff_name_only(["--name-only", "--diff-filter=AM"]))
+        files.concat(git_diff_name_only(["--name-only", "-M", "-C", "--diff-filter=ACMR"]))
         files.concat(git_untracked_files)
       end
 
       if @options[:include_staged]
-        files.concat(git_diff_name_only(["--name-only", "--cached", "--diff-filter=AM"]))
+        files.concat(git_diff_name_only(["--name-only", "--cached", "-M", "-C", "--diff-filter=ACMR"]))
       end
 
       if @options[:include_committed_diff]
@@ -139,15 +139,52 @@ module QuickCheck
         if current_branch && base_branch && current_branch != base_branch
           # Include files changed on this branch vs base
           range = diff_range_against_base(base_branch)
-          files.concat(git_diff_name_only(["--name-only", "--diff-filter=AM", range])) if range
+          files.concat(git_diff_name_only(["--name-only", "-M", "-C", "--diff-filter=ACMR", range])) if range
         end
       end
 
       files = files.compact.uniq
       rspec_specs = files.select { |f| f.match?(%r{\Aspec/.+_spec\.rb\z}) }
+      rspec_specs += infer_rspec_from_source(files)
       minitest_tests = files.select { |f| f.match?(%r{\Atest/.+_test\.rb\z}) }
 
-      { rspec: rspec_specs.sort, minitest: minitest_tests.sort }
+      { rspec: rspec_specs.uniq, minitest: minitest_tests.uniq }
+    end
+
+    def infer_rspec_from_source(files)
+      candidates = []
+      files.each do |path|
+        next unless path.end_with?(".rb")
+
+        if path =~ %r{\Aapp/models/(.+)\.rb\z}
+          spec_path = File.join("spec", "models", "#{$1}_spec.rb")
+          candidates << spec_path if File.file?(spec_path)
+          next
+        end
+
+        if path =~ %r{\Aapp/controllers/(.+?)(?:_controller)?\.rb\z}
+          controller_path = Regexp.last_match(1)
+          req_base = File.join("spec", "requests", controller_path)
+          req_variants = [
+            "#{req_base}_spec.rb",
+            "#{req_base}_controller_spec.rb"
+          ].select { |p| File.file?(p) }
+          if req_variants.any?
+            candidates.concat(req_variants)
+          else
+            ctrl_spec = File.join("spec", "controllers", "#{controller_path}_controller_spec.rb")
+            candidates << ctrl_spec if File.file?(ctrl_spec)
+          end
+          next
+        end
+
+        if path =~ %r{\Alib/(.+)\.rb\z}
+          spec_path = File.join("spec", "lib", "#{$1}_spec.rb")
+          candidates << spec_path if File.file?(spec_path)
+          next
+        end
+      end
+      candidates
     end
 
     def ensure_git_repo!
@@ -196,12 +233,17 @@ module QuickCheck
     end
 
     def branch_exists?(name)
-      ok, _out, _err = run_cmd(["git", "show-ref", "--verify", "--quiet", "refs/heads/#{name}"])
-      return true if ok
+      local_branch_exists?(name) || remote_branch_exists?(name)
+    end
 
-      # fall back to remote branch
-      ok, _out, _err = run_cmd(["git", "ls-remote", "--heads", "origin", name])
-      ok && !_out.to_s.strip.empty?
+    def local_branch_exists?(name)
+      ok, _out, _err = run_cmd(["git", "show-ref", "--verify", "--quiet", "refs/heads/#{name}"])
+      ok
+    end
+
+    def remote_branch_exists?(name)
+      ok, out, _err = run_cmd(["git", "ls-remote", "--heads", "origin", name])
+      ok && !out.to_s.strip.empty?
     end
 
     def git_current_branch
@@ -215,9 +257,12 @@ module QuickCheck
     end
 
     def diff_range_against_base(base)
-      # Prefer the symmetric range base...HEAD if base exists
-      if branch_exists?(base)
+      # Prefer the symmetric range base...HEAD if base exists locally,
+      # otherwise fall back to origin/base...HEAD when only remote exists.
+      if local_branch_exists?(base)
         "#{base}...HEAD"
+      elsif remote_branch_exists?(base)
+        "origin/#{base}...HEAD"
       else
         nil
       end
