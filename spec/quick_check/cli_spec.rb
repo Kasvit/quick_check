@@ -53,7 +53,7 @@ RSpec.describe QuickCheck::CLI do
 
   it "runs rspec for changed rspec files" do
     stubs = base_git_stubs.merge(
-      "git diff --name-only --diff-filter=ACMR" => { stdout: "spec/models/user_spec.rb\n" }
+      "git diff --name-only -M -C --diff-filter=ACMR" => { stdout: "spec/models/user_spec.rb\n" }
     )
 
     status, out, _err = run_cli(["--dry-run"], git_outputs: stubs)
@@ -63,7 +63,7 @@ RSpec.describe QuickCheck::CLI do
 
   it "infers rspec from app source change" do
     stubs = base_git_stubs.merge(
-      "git diff --name-only --diff-filter=ACMR" => { stdout: "app/models/user.rb\n" }
+      "git diff --name-only -M -C --diff-filter=ACMR" => { stdout: "app/models/user.rb\n" }
     )
     status, out, _err = run_cli(["--dry-run"], git_outputs: stubs, existing_files: [
       File.join("spec", "models", "user_spec.rb")
@@ -74,7 +74,7 @@ RSpec.describe QuickCheck::CLI do
 
   it "maps controller to request spec with both base names" do
     stubs = base_git_stubs.merge(
-      "git diff --name-only --diff-filter=ACMR" => { stdout: "app/controllers/account/users_controller.rb\n" }
+      "git diff --name-only -M -C --diff-filter=ACMR" => { stdout: "app/controllers/account/users_controller.rb\n" }
     )
     existing = [
       File.join("spec", "requests", "account", "users_spec.rb"),
@@ -87,7 +87,7 @@ RSpec.describe QuickCheck::CLI do
 
   it "falls back to controller spec when no request spec exists" do
     stubs = base_git_stubs.merge(
-      "git diff --name-only --diff-filter=ACMR" => { stdout: "app/controllers/home_controller.rb\n" }
+      "git diff --name-only -M -C --diff-filter=ACMR" => { stdout: "app/controllers/home_controller.rb\n" }
     )
     existing = [File.join("spec", "controllers", "home_controller_spec.rb")]
     status, out, _err = run_cli(["--dry-run"], git_outputs: stubs, existing_files: existing)
@@ -97,7 +97,7 @@ RSpec.describe QuickCheck::CLI do
 
   it "runs minitest through rails test when test files change and rails present" do
     stubs = base_git_stubs.merge(
-      "git diff --name-only --diff-filter=ACMR" => { stdout: "test/models/user_test.rb\n" }
+      "git diff --name-only -M -C --diff-filter=ACMR" => { stdout: "test/models/user_test.rb\n" }
     )
     allow_any_instance_of(QuickCheck::CLI).to receive(:rails_available?).and_return(true)
     status, out, _err = run_cli(["--dry-run"], git_outputs: stubs, existing_files: [File.join("bin", "rails")])
@@ -107,7 +107,7 @@ RSpec.describe QuickCheck::CLI do
 
   it "runs per-file minitest when no rails" do
     stubs = base_git_stubs.merge(
-      "git diff --name-only --diff-filter=ACMR" => { stdout: "test/models/user_test.rb\n" }
+      "git diff --name-only -M -C --diff-filter=ACMR" => { stdout: "test/models/user_test.rb\n" }
     )
 
     status, out, _err = run_cli(["--dry-run"], git_outputs: stubs)
