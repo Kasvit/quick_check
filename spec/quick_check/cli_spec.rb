@@ -115,11 +115,47 @@ RSpec.describe QuickCheck::CLI do
     expect(status).to eq(0)
   end
 
-  it "uses merge-base to handle rebases correctly" do
+  it "uses first-parent to handle rebases correctly" do
     stubs = base_git_stubs.merge(
       "git show-ref --verify --quiet refs/heads/main" => { success: true },
-      "git merge-base main HEAD" => { stdout: "abc123def456\n" },
-      "git diff --name-only -M -C --diff-filter=ACMR abc123def456...HEAD" => { stdout: "spec/my_feature_spec.rb\n" }
+      "git log --first-parent --name-only --diff-filter=ACMR --format= main..HEAD" => { stdout: "spec/my_feature_spec.rb\n" }
+    )
+
+    status, out, _err = run_cli(["--base", "main", "--dry-run", "--no-unstaged", "--no-staged"], git_outputs: stubs)
+    expect(status).to eq(0)
+    expect(out).to include("bundle exec rspec spec/my_feature_spec.rb")
+  end
+
+  it "prefers upstream branch over base branch when upstream has differences" do
+    stubs = base_git_stubs.merge(
+      "git rev-parse --abbrev-ref --symbolic-full-name feature@{u}" => { stdout: "origin/feature\n" },
+      "git rev-parse --verify --quiet origin/feature" => { success: true },
+      "git rev-list --count origin/feature..HEAD" => { stdout: "5\n" },
+      "git log --first-parent --name-only --diff-filter=ACMR --format= origin/feature..HEAD" => { stdout: "spec/my_local_change_spec.rb\n" }
+    )
+
+    status, out, _err = run_cli(["--base", "main", "--dry-run", "--no-unstaged", "--no-staged"], git_outputs: stubs)
+    expect(status).to eq(0)
+    expect(out).to include("bundle exec rspec spec/my_local_change_spec.rb")
+  end
+
+  it "does not include committed changes when upstream is in sync" do
+    stubs = base_git_stubs.merge(
+      "git rev-parse --abbrev-ref --symbolic-full-name feature@{u}" => { stdout: "origin/feature\n" },
+      "git rev-parse --verify --quiet origin/feature" => { success: true },
+      "git rev-list --count origin/feature..HEAD" => { stdout: "0\n" }
+    )
+
+    status, out, _err = run_cli(["--base", "main", "--dry-run", "--no-unstaged", "--no-staged"], git_outputs: stubs)
+    expect(status).to eq(0)
+    expect(out).to include("No changed/added test files detected.")
+  end
+
+  it "falls back to base branch when no upstream exists" do
+    stubs = base_git_stubs.merge(
+      "git rev-parse --abbrev-ref --symbolic-full-name feature@{u}" => { success: false, exitstatus: 128 },
+      "git show-ref --verify --quiet refs/heads/main" => { success: true },
+      "git log --first-parent --name-only --diff-filter=ACMR --format= main..HEAD" => { stdout: "spec/my_feature_spec.rb\n" }
     )
 
     status, out, _err = run_cli(["--base", "main", "--dry-run", "--no-unstaged", "--no-staged"], git_outputs: stubs)
