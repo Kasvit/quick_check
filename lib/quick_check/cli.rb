@@ -137,23 +137,13 @@ module QuickCheck
       if @options[:include_committed_diff]
         current_branch = git_current_branch
         if current_branch && base_branch && current_branch != base_branch
-          # Prefer comparing against upstream tracking branch if it exists and has differences.
-          # This correctly handles rebases by only showing changes unique to the local branch,
-          # not changes that came from the base branch during the rebase.
           upstream_branch = git_upstream_branch(current_branch)
-          if upstream_branch
-            if upstream_has_differences?(upstream_branch)
-              # Compare local branch against its remote tracking branch
-              # Use --first-parent to exclude changes from merge commits
-              changed_files = diff_range_against_upstream(upstream_branch)
-              files.concat(changed_files) if changed_files
-            end
-            # If upstream is in sync, don't include committed changes (only staged/unstaged)
-            # This avoids testing files that were already tested when the branch was pushed
-          else
-            # Fall back to comparing against base branch if no upstream exists.
-            # Use --first-parent to ensure we only get changes from commits directly on this branch,
-            # excluding changes from merge commits.
+          # Prefer upstream tracking branch to correctly handle rebases (only shows local changes)
+          if upstream_branch && upstream_has_differences?(upstream_branch)
+            changed_files = diff_range_against_upstream(upstream_branch)
+            files.concat(changed_files) if changed_files
+          elsif !upstream_branch
+            # Fall back to base branch if no upstream exists
             changed_files = diff_range_against_base(base_branch)
             files.concat(changed_files) if changed_files
           end
@@ -288,26 +278,18 @@ module QuickCheck
     end
 
     def upstream_has_differences?(upstream)
-      # Check if there are any differences between HEAD and upstream
-      # This helps us decide whether to use upstream or fall back to base branch
+      # Only use upstream if it has local commits (avoids testing already-pushed changes)
       ok, out, _err = run_cmd(["git", "rev-list", "--count", "#{upstream}..HEAD"])
       return false unless ok
-      count = out.to_s.strip.to_i
-      count > 0
+      out.to_s.strip.to_i > 0
     end
 
     def diff_range_against_upstream(upstream)
-      # Use git log --first-parent to get only files changed in commits directly on this branch,
-      # excluding changes from merge commits. This correctly handles branches that have merged
-      # main into them by only showing changes unique to the branch's own commits.
       files = git_log_first_parent_files(upstream, "HEAD")
       files.empty? ? nil : files
     end
 
     def diff_range_against_base(base)
-      # Use git log --first-parent to get only files changed in commits directly on this branch,
-      # excluding changes from merge commits. This correctly handles branches that have merged
-      # main into them by only showing changes unique to the branch's own commits.
       base_ref = if local_branch_exists?(base)
                    base
                  elsif remote_branch_exists?(base)
@@ -315,37 +297,15 @@ module QuickCheck
                  else
                    return nil
                  end
-      
-      # Get files changed in first-parent commits only (excludes merge commits)
       files = git_log_first_parent_files(base_ref, "HEAD")
       files.empty? ? nil : files
     end
 
-    def find_merge_base(base)
-      # Try local branch first, then remote
-      ref = if local_branch_exists?(base)
-              base
-            elsif remote_branch_exists?(base)
-              "origin/#{base}"
-            else
-              return nil
-            end
-
-      find_merge_base_for_refs(ref, "HEAD")
-    end
-
-    def find_merge_base_for_refs(ref1, ref2)
-      ok, out, _err = run_cmd(["git", "merge-base", ref1, ref2])
-      ok ? out.to_s.strip : nil
-    end
-
     def git_log_first_parent_files(base_ref, head_ref)
-      # Get files changed in first-parent commits only (excludes merge commits)
-      # This ensures we only get changes from commits directly on the branch
+      # Use --first-parent to exclude merge commits, only showing changes from direct branch commits
       cmd = ["git", "log", "--first-parent", "--name-only", "--diff-filter=ACMR", "--format=", "#{base_ref}..#{head_ref}"]
       ok, out, _err = run_cmd(cmd)
       return [] unless ok
-      
       out.split("\n").map(&:strip).reject(&:empty?).uniq
     end
 
