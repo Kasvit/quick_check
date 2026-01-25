@@ -114,4 +114,16 @@ RSpec.describe QuickCheck::CLI do
     expect(out.lines.map(&:strip)).to include("ruby -I test test/models/user_test.rb")
     expect(status).to eq(0)
   end
+
+  it "uses merge-base to handle rebases correctly" do
+    stubs = base_git_stubs.merge(
+      "git show-ref --verify --quiet refs/heads/main" => { success: true },
+      "git merge-base main HEAD" => { stdout: "abc123def456\n" },
+      "git diff --name-only -M -C --diff-filter=ACMR abc123def456...HEAD" => { stdout: "spec/my_feature_spec.rb\n" }
+    )
+
+    status, out, _err = run_cli(["--base", "main", "--dry-run", "--no-unstaged", "--no-staged"], git_outputs: stubs)
+    expect(status).to eq(0)
+    expect(out).to include("bundle exec rspec spec/my_feature_spec.rb")
+  end
 end

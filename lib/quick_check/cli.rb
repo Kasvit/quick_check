@@ -257,15 +257,25 @@ module QuickCheck
     end
 
     def diff_range_against_base(base)
-      # Prefer the symmetric range base...HEAD if base exists locally,
-      # otherwise fall back to origin/base...HEAD when only remote exists.
-      if local_branch_exists?(base)
-        "#{base}...HEAD"
-      elsif remote_branch_exists?(base)
-        "origin/#{base}...HEAD"
-      else
-        nil
-      end
+      # Use merge-base to find the common ancestor, which correctly handles
+      # rebases and merges by only showing changes unique to the current branch.
+      # This avoids including incoming changes from merges/rebases.
+      merge_base = find_merge_base(base)
+      merge_base ? "#{merge_base}...HEAD" : nil
+    end
+
+    def find_merge_base(base)
+      # Try local branch first, then remote
+      ref = if local_branch_exists?(base)
+              base
+            elsif remote_branch_exists?(base)
+              "origin/#{base}"
+            else
+              return nil
+            end
+
+      ok, out, _err = run_cmd(["git", "merge-base", ref, "HEAD"])
+      ok ? out.to_s.strip : nil
     end
 
     def git_diff_name_only(args)
