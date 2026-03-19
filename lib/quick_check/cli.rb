@@ -137,9 +137,16 @@ module QuickCheck
       if @options[:include_committed_diff]
         current_branch = git_current_branch
         if current_branch && base_branch && current_branch != base_branch
-          # Include files changed on this branch vs base
-          range = diff_range_against_base(base_branch)
-          files.concat(git_diff_name_only(["--name-only", "-M", "-C", "--diff-filter=ACMR", range])) if range
+          upstream_branch = git_upstream_branch(current_branch)
+          # Prefer upstream tracking branch to correctly handle rebases (only shows local changes)
+          if upstream_branch && upstream_has_differences?(upstream_branch)
+            changed_files = diff_range_against_upstream(upstream_branch)
+            files.concat(changed_files) if changed_files
+          elsif !upstream_branch
+            # Fall back to base branch if no upstream exists
+            changed_files = diff_range_against_base(base_branch)
+            files.concat(changed_files) if changed_files
+          end
         end
       end
 
@@ -256,16 +263,50 @@ module QuickCheck
       ok ? out.to_s.strip : nil
     end
 
-    def diff_range_against_base(base)
-      # Prefer the symmetric range base...HEAD if base exists locally,
-      # otherwise fall back to origin/base...HEAD when only remote exists.
-      if local_branch_exists?(base)
-        "#{base}...HEAD"
-      elsif remote_branch_exists?(base)
-        "origin/#{base}...HEAD"
-      else
-        nil
+    def git_upstream_branch(branch)
+      # Get the upstream tracking branch for the current branch
+      ok, out, _err = run_cmd(["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "#{branch}@{u}"])
+      if ok && !out.to_s.strip.empty?
+        upstream = out.to_s.strip
+        # Verify the upstream branch actually exists
+        ok_check, _out_check, _err_check = run_cmd(["git", "rev-parse", "--verify", "--quiet", upstream])
+        return upstream if ok_check
       end
+      nil
+    rescue StandardError
+      nil
+    end
+
+    def upstream_has_differences?(upstream)
+      # Only use upstream if it has local commits (avoids testing already-pushed changes)
+      ok, out, _err = run_cmd(["git", "rev-list", "--count", "#{upstream}..HEAD"])
+      return false unless ok
+      out.to_s.strip.to_i > 0
+    end
+
+    def diff_range_against_upstream(upstream)
+      files = git_log_first_parent_files(upstream, "HEAD")
+      files.empty? ? nil : files
+    end
+
+    def diff_range_against_base(base)
+      base_ref = if local_branch_exists?(base)
+                   base
+                 elsif remote_branch_exists?(base)
+                   "origin/#{base}"
+                 else
+                   return nil
+                 end
+      files = git_log_first_parent_files(base_ref, "HEAD")
+      files.empty? ? nil : files
+    end
+
+    def git_log_first_parent_files(base_ref, head_ref)
+      # Use --first-parent to exclude merge commits, only showing changes from direct branch commits
+      cmd = ["git", "log", "--first-parent", "--name-only", "--diff-filter=ACMR", "--format=", "#{base_ref}..#{head_ref}"]
+      ok, out, _err = run_cmd(cmd)
+      return [] unless ok
+      out.split("\n").map(&:strip).reject(&:empty?).uniq
     end
 
     def git_diff_name_only(args)
